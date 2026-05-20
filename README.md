@@ -61,12 +61,14 @@ Quote LTL from 90007 to 90038 pickup June 25, 2 pallets 500 lb each.
 | `warp-agent box-truck quote ZIP ZIP --pallets N --weight LBS --date YYYY-MM-DD` | Box truck quote |
 | `warp-agent ftl quote ZIP ZIP --date YYYY-MM-DD` | Full truckload quote |
 | `warp-agent ltl quote ZIP ZIP --pallets N --weight LBS --dims LxWxH --date YYYY-MM-DD` | LTL quote |
-| `warp-agent multistop quote --date YYYY-MM-DD --stops ...` | Multi-stop FTL |
+| `warp-agent book QUOTE_ID --pickup-* --delivery-*` | Book a quoted shipment |
+| `warp-agent track SHIPMENT_ID` | Track a shipment |
+| `warp-agent events SHIPMENT_ID` | Tracking event timeline |
+| `warp-agent invoice ORDER_ID` | Shipment invoice |
+| `warp-agent documents ORDER_ID --type bol` | Shipment documents (use `--type bol` for the Bill of Lading) |
 | `warp-agent bookings` | List recent bookings |
 | `warp-agent lanes` | Lane history |
 | `warp-agent quote-history` | List recent quotes |
-| `warp-agent rate-card` | Negotiated rate card (if any) |
-| `warp-agent analytics` | Bookings + revenue rollup |
 
 All commands accept `--help` for full option listings, and `--format json` /
 `--format table` to control output.

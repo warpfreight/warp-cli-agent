@@ -814,16 +814,6 @@ program
     }),
   );
 
-program
-  .command("rate-card")
-  .description("Show standard rate card + your historical pricing per mode")
-  .action(() =>
-    run(async () => {
-      const data = await getAuthedClient().rateCard();
-      output(data, getFmt());
-    }),
-  );
-
 // ── Shipment lifecycle (auth) ──────────────────────────────
 
 program
@@ -848,10 +838,11 @@ program
 
 program
   .command("documents <order_id>")
-  .description("List shipment documents (BOL, POD, customs forms)")
-  .action((orderId: string) =>
+  .description("List shipment documents. Use --type bol for the Bill of Lading (incl. external/market-carrier BOLs).")
+  .option("--type <type>", "Filter to one document type, e.g. 'bol' or 'pod'")
+  .action((orderId: string, opts: { type?: string }) =>
     run(async () => {
-      const data = await getAuthedClient().documents(orderId);
+      const data = await getAuthedClient().documents(orderId, opts.type);
       output(data, getFmt());
     }),
   );
@@ -867,32 +858,6 @@ program
   );
 
 // ── Multi-stop FTL ──────────────────────────────────────────
-
-const multistop = program
-  .command("multistop")
-  .description("Multi-stop FTL operations (one truck, multiple pickups/deliveries)");
-
-multistop
-  .command("quote <body_file>")
-  .description("Quote a multi-stop FTL shipment. body_file is a JSON file with pickup_date, stops[], total_pallets, total_weight_lbs.")
-  .action((file: string) =>
-    run(async () => {
-      const body = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
-      const data = await getAuthedClient().multistopQuote(body);
-      output(data, getFmt());
-    }),
-  );
-
-multistop
-  .command("book <body_file>")
-  .description("Book a multi-stop FTL shipment. body_file is a JSON file with quote_id, stops[] (with addresses), reference, notes.")
-  .action((file: string) =>
-    run(async () => {
-      const body = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
-      const data = await getAuthedClient().multistopBook(body);
-      output(data, getFmt());
-    }),
-  );
 
 // ── Analytics ──────────────────────────────────────────────
 

@@ -242,8 +242,10 @@ export class WarpClient {
 
   // ── Documents (apikey required) ───────────────────────────────
 
-  async documents(orderId: string): Promise<unknown> {
-    return this.get(`/freights/documents/${encodeURIComponent(orderId)}`, true);
+  async documents(orderId: string, type?: string): Promise<unknown> {
+    // ?type=bol returns external/brokered carrier BOLs too (Warp backend update 2026-05).
+    const q = type ? `?type=${encodeURIComponent(type)}` : "";
+    return this.get(`/freights/documents/${encodeURIComponent(orderId)}${q}`, true);
   }
 
   // ── Quote history (apikey required) ──────────────────────────
@@ -274,28 +276,6 @@ export class WarpClient {
       }
     }
     return { lanes } as unknown as LanesResponse;
-  }
-
-  // ── Rate card (static — no apikey needed) ────────────────────
-
-  async rateCard(): Promise<unknown> {
-    return {
-      pricing: "all_inclusive",
-      currency: "USD",
-      quote_validity_minutes: 15,
-      promo_code: { code: "Warp2026", discount_usd: 50, per_shipment: true },
-      note: "Get live pricing via quote commands: warp-agent ltl quote <origin> <dest>",
-    };
-  }
-
-  // ── Multi-stop FTL ───────────────────────────────────────────
-
-  async multistopQuote(body: Record<string, unknown>): Promise<unknown> {
-    return this.post("/freights/quote/multi-stops", body, true);
-  }
-
-  async multistopBook(body: Record<string, unknown>): Promise<unknown> {
-    return this.post("/freights/booking/multi-stops", body, true);
   }
 
   // ── Status (public) ──────────────────────────────────────────
