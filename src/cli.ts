@@ -10,6 +10,33 @@ import { trackBooking, trackEvent, getAnalytics, cacheQuoteAmount, getCachedQuot
 import { notifyQuote, notifyBooking } from "./slack.js";
 import type { AddressContact, BookPatch } from "./types.js";
 
+// Reverse a charge-me charge after a failed booking via /agents/refund-me
+// (idempotent server-side, keyed on the PaymentIntent). Returns a human note
+// for the error message; never throws — degrades to a support message if the
+// refund can't be confirmed.
+async function autoRefund(apiKey: string, paymentIntentId: string | undefined, amount: number, quoteId: string): Promise<string> {
+  const dollars = `$${amount.toFixed(2)}`;
+  if (!paymentIntentId) {
+    return `Your card was charged ${dollars} but the booking failed and no charge reference was captured to auto-refund. Contact support@wearewarp.com (quote ${quoteId}) to reverse it.`;
+  }
+  try {
+    const res = await fetch("https://www.wearewarp.com/api/v1/agents/refund-me", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+      body: JSON.stringify({ payment_intent_id: paymentIntentId }),
+      signal: AbortSignal.timeout(10000),
+    });
+    const b = await res.json().catch(() => ({})) as Record<string, unknown>;
+    if (res.ok && (b.status === "succeeded" || b.status === "pending")) {
+      return `Your ${dollars} charge was automatically refunded (refund ${b.refund_id}${b.test_mode ? ", sandbox" : ""}) — no action needed.`;
+    }
+    if (res.status === 409) return `Your ${dollars} charge was already refunded — no action needed.`;
+    return `We attempted to auto-refund your ${dollars} charge but it did not confirm (${String(b.error ?? b.code ?? res.status)}). Contact support@wearewarp.com (quote ${quoteId}) to confirm the reversal.`;
+  } catch {
+    return `We attempted to auto-refund your ${dollars} charge but the refund request errored. Contact support@wearewarp.com (quote ${quoteId}) to confirm the reversal.`;
+  }
+}
+
 // ── ASCII banner ──────────────────────────────────────────────
 
 const BANNER = `
@@ -696,6 +723,9 @@ program
         const hasPatch = patch.pickup || patch.delivery || patch.notes || patch.listItems;
 
         // ── Charge card via wearewarp.com before booking ────────────────
+        // Captured from charge-me so a failed book below can be auto-refunded.
+        let paymentIntentId: string | undefined;
+        let chargedAmount = 0;
         const config = loadConfig();
         if (config?.api_key) {
           // Get amount from cache — if missing, re-quote to get fresh price
@@ -735,6 +765,11 @@ program
               }
               throw new Error(`Payment failed: ${chargeBody.error ?? chargeRes.status}`);
             }
+            // Charge succeeded — capture the PaymentIntent id + amount so a
+            // failed book below can be auto-refunded.
+            const okBody = await chargeRes.json().catch(() => ({})) as { payment_intent_id?: string };
+            paymentIntentId = okBody.payment_intent_id;
+            chargedAmount = amountForCharge;
           } catch (chargeErr: unknown) {
             if (chargeErr instanceof Error) throw chargeErr;
             throw new Error('Could not reach payment service. Check your connection and retry.');
@@ -743,13 +778,24 @@ program
         // ─────────────────────────────────────────────────────────────────
 
         let data: Record<string, unknown>;
-        await showLoginSpinner("Booking shipment...", getAuthedClient().book(
-          quoteId,
-          hasPatch ? patch : undefined,
-          opts.reference,
-          opts.promo,
-        ).then(r => { data = r as unknown as Record<string, unknown>; }));
-        data = data!;
+        try {
+          await showLoginSpinner("Booking shipment...", getAuthedClient().book(
+            quoteId,
+            hasPatch ? patch : undefined,
+            opts.reference,
+            opts.promo,
+          ).then(r => { data = r as unknown as Record<string, unknown>; }));
+          data = data!;
+        } catch (bookErr: unknown) {
+          // Charged above but the booking failed — reverse the charge so the
+          // customer is never left charged with no shipment.
+          const base = bookErr instanceof Error ? bookErr.message : String(bookErr);
+          if (chargedAmount > 0 && config?.api_key) {
+            const note = await autoRefund(config.api_key, paymentIntentId, chargedAmount, quoteId);
+            throw new Error(`Booking failed: ${base}\n\n${note}`);
+          }
+          throw bookErr;
+        }
 
         const bookData = data as unknown as Record<string, unknown>;
         // Do-not-invoice is handled server-side by warp-site during book —
