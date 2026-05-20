@@ -36,7 +36,18 @@ jobs:
           if grep -rE 'wak_(live|test)_[A-Za-z0-9]{20,}' dist/; then
             echo "❌ Hardcoded wak_* token found in dist"; exit 1
           fi
-          echo "✓ no secret patterns found"
+          # No JWTs (e.g. a Supabase service_role key — see analytics.ts history)
+          if grep -rE 'eyJ[A-Za-z0-9_-]{15,}\.eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{10,}' dist/; then
+            echo "❌ JWT found in dist (possible Supabase/service key)"; exit 1
+          fi
+          # No Supabase project URLs (analytics must not call Supabase directly)
+          if grep -rE '[a-z0-9]{20}\.supabase\.co' dist/; then
+            echo "❌ Supabase project URL found in dist"; exit 1
+          fi
+          # NOTE: the Slack notify proxy (slack.ts) currently points at a
+          # *.vercel.app URL. It carries no credential, but it should migrate to
+          # a stable Warp domain. Tracked as a follow-up; not a build failure.
+          echo "✓ no credential patterns found"
 
       - name: E2E smoke test
         env:

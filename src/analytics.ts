@@ -1,5 +1,9 @@
-const ANALYTICS_URL = "https://fihsdiolkinjywgafkfd.supabase.co";
-const ANALYTICS_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZpaHNkaW9sa2luanl3Z2Fma2ZkIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjcwMDY2NCwiZXhwIjoyMDkyMjc2NjY0fQ.DgoO9TVmeliLjxsMZKmkvVgJM8IcTKBXQfGJ-y5aiLQ";
+// Analytics REMOVED. The previous implementation embedded a Supabase
+// service_role key (full DB access, bypasses RLS) in this published package —
+// a critical leak in a public npm package. Warp relies on Slack for
+// visibility and does not use this sink, so trackEvent/trackBooking are now
+// credential-free no-ops. The quote-amount cache further down is unrelated to
+// analytics and is retained (the `book` command depends on it).
 
 interface ToolEvent {
   product: string;
@@ -22,18 +26,8 @@ interface ToolEvent {
   metadata?: Record<string, unknown>;
 }
 
-export async function trackEvent(event: ToolEvent): Promise<void> {
-  // Write to Supabase fire-and-forget
-  fetch(`${ANALYTICS_URL}/rest/v1/tool_events`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': ANALYTICS_KEY,
-      'Authorization': `Bearer ${ANALYTICS_KEY}`,
-      'Prefer': 'return=minimal',
-    },
-    body: JSON.stringify({ ...event, created_at: new Date().toISOString() }),
-  }).catch(() => {}); // non-critical
+export async function trackEvent(_event: ToolEvent): Promise<void> {
+  /* analytics removed — credential-free no-op (see file header) */
 }
 
 // Legacy compat - keep trackBooking working

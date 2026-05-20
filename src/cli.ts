@@ -898,12 +898,12 @@ multistop
 
 program
   .command("analytics")
-  .description("Show bookings revenue and shipment counts by tool (MCP vs CLI)")
+  .description("(removed) Usage analytics are no longer collected")
   .action(() =>
     run(async () => {
       console.log(`\n\x1b[1mWarp Tool Analytics\x1b[0m`);
-      console.log(`\x1b[2m  Analytics are now tracked in Supabase. View your dashboard for full stats.\x1b[0m`);
-      console.log(`  Dashboard: https://product-analytics-master-dash.vercel.app`);
+      console.log(`\x1b[2m  Usage analytics collection has been removed. Use your bookings list\x1b[0m`);
+      console.log(`\x1b[2m  (warp-agent bookings) and the Warp portal for shipment + revenue data.\x1b[0m`);
       console.log("");
     }),
   );
