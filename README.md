@@ -103,7 +103,7 @@ cargo van, box truck, and multi-stop FTL.
 
 ## Contributing
 
-Issues and PRs welcome at <https://github.com/rahulharikumarr/warp-cli-agent>.
+Issues and PRs welcome at <https://github.com/warpfreight/warp-cli-agent>.
 
 ## License
 
