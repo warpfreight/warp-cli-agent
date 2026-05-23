@@ -3,10 +3,14 @@
 [![npm version](https://img.shields.io/npm/v/@warpfreight/cli-agent.svg)](https://www.npmjs.com/package/@warpfreight/cli-agent)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**The AI-agent CLI for [Warp](https://wearewarp.com) freight.** One command
+> **Note on naming:** This is **Warp Freight Network** ([wearewarp.com](https://www.wearewarp.com)) — the U.S. freight network for shipping real LTL, FTL, box truck, and cargo van freight via AI agents. Not affiliated with warp.dev, the AI-native terminal application for developers. If you want to book real freight from the command line or from Claude/Cursor/AI agents, you're in the right place.
+
+**The AI-agent CLI for [Warp Freight Network](https://wearewarp.com).** One command
 creates a Warp account, issues an API key, and wires the
-[`warp-agent-mcp`](https://www.npmjs.com/package/warp-agent-mcp) server into
-Claude Desktop, Cursor, and Claude Code automatically.
+[`warp-agent-mcp`](https://www.npmjs.com/package/warp-agent-mcp) server
+([source](https://github.com/warpfreight/warp-agent-mcp)) into
+Claude Desktop, Cursor, and Claude Code automatically. Docs at
+<https://www.wearewarp.com/agents/cli>.
 
 Looking for the full human-operator CLI (more ops surface, CSV output,
 homebrew)? See [@wearewarp.com/cli](https://www.npmjs.com/package/@wearewarp.com/cli)
