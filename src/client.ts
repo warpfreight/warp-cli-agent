@@ -87,40 +87,16 @@ export class WarpClient {
   }
 
   async quoteFtl(origin: string, dest: string, date: string): Promise<QuoteResponse> {
-    const PUBLIC_FTL_URL = "https://gw.wearewarp.com/api/v1/p/customer-cli/freight-quote/search";
-    const PUBLIC_KEY = "warp-public-freight-quote@wearewarp.com";
-    const body = {
-      key: PUBLIC_KEY,
-      shipmentType: "FTL",
-      vehicleType: { code: "DRY_VAN_53" },
-      pickZipcode: origin,
-      dropZipcode: dest,
-      pickDate: date,
-      packaging: { ltlItems: [{ name: "Freight", length: 48, width: 40, height: 48, qty: 1, qtyUnit: "Pallet", weightPerUnit: 1000, weightUnit: "lbs", weightTotal: 1000 }] },
-      isHazardous: false,
-      isTemperatureControlled: false,
-      pickupServices: [],
-      dropoffServices: [],
-    };
-    const res = await fetch(PUBLIC_FTL_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    if (!res.ok) throw new Error(`FTL quote failed: ${res.status}`);
-    const data = await res.json() as Record<string, unknown>;
-    const rawQuotes: unknown[] = (data?.data as Record<string, unknown>)?.quote as unknown[] ?? [];
-    // Build warp + market structure matching QuoteResponse shape
-    const getOpt = (q: unknown) => ((q as Record<string, unknown>)?.warpQuote as Record<string, unknown>)?.option as Record<string, unknown>;
-    const warpRaw = rawQuotes.find((q: unknown) => getOpt(q)?.carrierName?.toString().toLowerCase().includes('warp')) as Record<string, unknown> | undefined;
-    const marketOptions = rawQuotes
-      .filter((q: unknown) => !getOpt(q)?.carrierName?.toString().toLowerCase().includes('warp'))
-      .map((q: unknown) => {
-        const raw = q as Record<string, unknown>;
-        const opt = getOpt(raw);
-        return { id: opt?.id || "", carrierName: opt?.carrierName || "Unknown", rate: (opt?.rate as Record<string,unknown>)?.avg ?? 0, transitTime: ((raw?.transitDay as number) ?? 0) * 86400, source: opt?.source || "market", serviceLevel: "STANDARD", shipmentType: "FTL" };
-      });
-    const warpOpt = warpRaw ? getOpt(warpRaw) : null;
-    return {
-      warp: warpOpt ? { quote_id: warpOpt?.id, price: { amount: (warpOpt?.rate as Record<string,unknown>)?.avg ?? 0, currency_code: "USD" }, transit_time: (warpRaw?.transitDay as number) ?? 0, status: "ACCEPT" } : null,
-      market: { options: marketOptions },
-    } as unknown as QuoteResponse;
+    // FTL prices the whole truck, so pallets/weight don't move the rate — use
+    // representative placeholders. Routes through the SAME working proxy path as
+    // the other modes (warpQuote + marketQuote); the old public-search endpoint
+    // (gw /p/customer-cli/freight-quote/search) was removed and 404s.
+    const items = this.buildItems(1, 1000);
+    const base = { pickupDate: date, pickupInfo: { zipcode: origin }, deliveryInfo: { zipcode: dest }, shipmentType: "FTL", vehicleType: { code: "DRY_VAN_53" } };
+    return this.quoteCombined(
+      { ...base, listItems: items },
+      { ...base, items },
+    );
   }
 
   async quoteLtl(
