@@ -81,6 +81,7 @@ const QUOTE_CACHE = join(homedir(), ".warp", "quote_cache.json");
 interface QuoteCacheEntry {
   amount?: number;
   listItems?: unknown[];
+  context?: Record<string, unknown>;
 }
 
 function readQuoteCache(): Record<string, QuoteCacheEntry> {
@@ -119,4 +120,19 @@ export function getCachedQuoteAmount(quoteId: string): number | undefined {
 
 export function getCachedQuoteItems(quoteId: string): unknown[] | undefined {
   try { return readQuoteCache()[quoteId]?.listItems; } catch { return undefined; }
+}
+
+// Full re-quote context, so `book` can re-quote via the self-serve
+// /api/v1/{mode}/quote endpoint (to get a wq_ id that /api/v1/book accepts —
+// which is what applies do-not-invoice + accessorials + windows server-side).
+export function cacheQuoteContext(quoteId: string, context: Record<string, unknown>): void {
+  try {
+    const cache = readQuoteCache();
+    cache[quoteId] = { ...cache[quoteId], context };
+    writeQuoteCache(cache);
+  } catch {}
+}
+
+export function getCachedQuoteContext(quoteId: string): Record<string, unknown> | undefined {
+  try { return readQuoteCache()[quoteId]?.context as Record<string, unknown> | undefined; } catch { return undefined; }
 }

@@ -6,36 +6,11 @@ import { WarpClient } from "./client.js";
 import { output, type Format } from "./output.js";
 import { loadConfig, saveConfig, clearConfig, configPath } from "./config.js";
 import { provisionWarpAccount, loginWarpAccount } from "./provision.js";
-import { trackBooking, trackEvent, getAnalytics, cacheQuoteAmount, getCachedQuoteAmount, cacheQuoteItems, getCachedQuoteItems } from "./analytics.js";
+import { trackBooking, trackEvent, getAnalytics, cacheQuoteAmount, getCachedQuoteAmount, cacheQuoteItems, cacheQuoteContext, getCachedQuoteContext } from "./analytics.js";
 import { notifyQuote, notifyBooking } from "./slack.js";
-import type { AddressContact, BookPatch } from "./types.js";
-
-// Reverse a charge-me charge after a failed booking via /agents/refund-me
-// (idempotent server-side, keyed on the PaymentIntent). Returns a human note
-// for the error message; never throws — degrades to a support message if the
-// refund can't be confirmed.
-async function autoRefund(apiKey: string, paymentIntentId: string | undefined, amount: number, quoteId: string): Promise<string> {
-  const dollars = `$${amount.toFixed(2)}`;
-  if (!paymentIntentId) {
-    return `Your card was charged ${dollars} but the booking failed and no charge reference was captured to auto-refund. Contact support@wearewarp.com (quote ${quoteId}) to reverse it.`;
-  }
-  try {
-    const res = await fetch("https://www.wearewarp.com/api/v1/agents/refund-me", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
-      body: JSON.stringify({ payment_intent_id: paymentIntentId }),
-      signal: AbortSignal.timeout(10000),
-    });
-    const b = await res.json().catch(() => ({})) as Record<string, unknown>;
-    if (res.ok && (b.status === "succeeded" || b.status === "pending")) {
-      return `Your ${dollars} charge was automatically refunded (refund ${b.refund_id}${b.test_mode ? ", sandbox" : ""}) — no action needed.`;
-    }
-    if (res.status === 409) return `Your ${dollars} charge was already refunded — no action needed.`;
-    return `We attempted to auto-refund your ${dollars} charge but it did not confirm (${String(b.error ?? b.code ?? res.status)}). Contact support@wearewarp.com (quote ${quoteId}) to confirm the reversal.`;
-  } catch {
-    return `We attempted to auto-refund your ${dollars} charge but the refund request errored. Contact support@wearewarp.com (quote ${quoteId}) to confirm the reversal.`;
-  }
-}
+// Booking now routes through the self-serve /api/v1/book endpoint, which charges
+// the card and books gw atomically server-side (refunding itself if the upstream
+// booking fails). The old client-side charge-me → book → autoRefund dance is gone.
 
 // ── ASCII banner ──────────────────────────────────────────────
 
@@ -439,7 +414,9 @@ addQuoteOpts(
         const data = await showPalletAnimation(getAuthedClient().quoteVan(origin, dest, opts.pallets, opts.weight, opts.date, pickupSvcs, deliverySvcs));
         trackEvent({ product: 'warp-agent', source: 'cli', event_type: 'quote', tool_name: 'van quote', success: true, origin_zip: origin, dest_zip: dest, mode: 'van', duration_ms: Date.now() - start });
         const _vanData = data as unknown as Record<string, unknown>;
-        notifyQuote({ source: 'cli', mode: 'van', origin_zip: origin, dest_zip: dest, pallets: opts.pallets, price: _vanData?.warp_price as number | undefined, quote_id: _vanData?.warp_quote_id as string | undefined, duration_ms: Date.now() - start }).catch(() => {});
+        const vanQid = (_vanData?.warp as Record<string, unknown>)?.quote_id as string | undefined;
+        if (vanQid) cacheQuoteContext(vanQid, { mode: 'van', origin_zip: origin, destination_zip: dest, pickup_date: opts.date, pallets: opts.pallets, weight_lbs_per_pallet: opts.weight, pickup_services: pickupSvcs, delivery_services: deliverySvcs });
+        notifyQuote({ source: 'cli', mode: 'van', origin_zip: origin, dest_zip: dest, pallets: opts.pallets, price: _vanData?.warp_price as number | undefined, quote_id: vanQid, duration_ms: Date.now() - start }).catch(() => {});
         output(data, getFmt());
       } catch (e) {
         trackEvent({ product: 'warp-agent', source: 'cli', event_type: 'error', tool_name: 'van quote', success: false, error_message: String(e), duration_ms: Date.now() - start });
@@ -466,7 +443,9 @@ addQuoteOpts(
         const data = await showPalletAnimation(getAuthedClient().quoteBoxTruck(origin, dest, opts.pallets, opts.weight, opts.date, pickupSvcs, deliverySvcs));
         trackEvent({ product: 'warp-agent', source: 'cli', event_type: 'quote', tool_name: 'box-truck quote', success: true, origin_zip: origin, dest_zip: dest, mode: 'box_truck', duration_ms: Date.now() - start });
         const _btData = data as unknown as Record<string, unknown>;
-        notifyQuote({ source: 'cli', mode: 'box_truck', origin_zip: origin, dest_zip: dest, pallets: opts.pallets, price: _btData?.warp_price as number | undefined, quote_id: _btData?.warp_quote_id as string | undefined, duration_ms: Date.now() - start }).catch(() => {});
+        const btQid = (_btData?.warp as Record<string, unknown>)?.quote_id as string | undefined;
+        if (btQid) cacheQuoteContext(btQid, { mode: 'box-truck', origin_zip: origin, destination_zip: dest, pickup_date: opts.date, pallets: opts.pallets, weight_lbs_per_pallet: opts.weight, pickup_services: pickupSvcs, delivery_services: deliverySvcs });
+        notifyQuote({ source: 'cli', mode: 'box_truck', origin_zip: origin, dest_zip: dest, pallets: opts.pallets, price: _btData?.warp_price as number | undefined, quote_id: btQid, duration_ms: Date.now() - start }).catch(() => {});
         output(data, getFmt());
       } catch (e) {
         trackEvent({ product: 'warp-agent', source: 'cli', event_type: 'error', tool_name: 'box-truck quote', success: false, error_message: String(e), duration_ms: Date.now() - start });
@@ -488,7 +467,10 @@ ftl
           validatePickupDate(opts.date);
           const data = await showPalletAnimation(getAuthedClient().quoteFtl(origin, dest, opts.date));
           trackEvent({ product: 'warp-agent', source: 'cli', event_type: 'quote', tool_name: 'ftl quote', success: true, origin_zip: origin, dest_zip: dest, mode: 'ftl', duration_ms: Date.now() - start });
-          notifyQuote({ source: 'cli', mode: 'ftl', origin_zip: origin, dest_zip: dest, duration_ms: Date.now() - start }).catch(() => {});
+          const _ftlData = data as unknown as Record<string, unknown>;
+          const ftlQid = (_ftlData?.warp as Record<string, unknown>)?.quote_id as string | undefined;
+          if (ftlQid) cacheQuoteContext(ftlQid, { mode: 'ftl', origin_zip: origin, destination_zip: dest, pickup_date: opts.date });
+          notifyQuote({ source: 'cli', mode: 'ftl', origin_zip: origin, dest_zip: dest, quote_id: ftlQid, duration_ms: Date.now() - start }).catch(() => {});
           output(data, getFmt());
         } catch (e) {
           trackEvent({ product: 'warp-agent', source: 'cli', event_type: 'error', tool_name: 'ftl quote', success: false, error_message: String(e), duration_ms: Date.now() - start });
@@ -567,6 +549,14 @@ ltl
             const weightPerPallet = opts.weight ?? 500;
             const [l, w, h] = [length ?? 48, width ?? 40, height ?? 48];
             cacheQuoteItems(ltlQid, [{ name: opts.commodity || 'Freight', quantity: pallets, totalWeight: pallets * weightPerPallet, weightUnit: 'lbs', length: l, width: w, height: h, sizeUnit: 'IN', stackable: false }]);
+            // Cache full re-quote context so `book` can re-quote via the self-serve
+            // /api/v1/ltl/quote endpoint to get a wq_ id that /api/v1/book accepts.
+            cacheQuoteContext(ltlQid, {
+              mode: 'ltl', origin_zip: origin, destination_zip: dest, pickup_date: opts.date,
+              pallets, weight_lbs_per_pallet: weightPerPallet, commodity: opts.commodity,
+              length_in: l, width_in: w, height_in: h,
+              pickup_services: pickupSvcs, delivery_services: deliverySvcs,
+            });
           }
           trackEvent({ product: 'warp-agent', source: 'cli', event_type: 'quote', tool_name: 'ltl quote', success: true, origin_zip: origin, dest_zip: dest, mode: 'ltl', amount_usd: ltlAmt, quote_id: ltlQid, duration_ms: Date.now() - start });
           notifyQuote({ source: 'cli', mode: 'ltl', origin_zip: origin, dest_zip: dest, pallets: opts.pallets, price: ltlAmt, quote_id: ltlQid, duration_ms: Date.now() - start }).catch(() => {});
@@ -640,26 +630,23 @@ program
       },
     ) =>
       run(async () => {
-        const patch: BookPatch = {};
-
-        // Build listItems from quote params if provided (must match original quote)
-        if (opts.pallets || opts.weight || opts.dims) {
-          const pallets = opts.pallets ?? 1;
-          const weightPerPallet = opts.weight ?? 500;
-          const [l, w, h] = (opts.dims ?? '48x40x48').split('x').map(Number);
-          patch.listItems = [{
-            name: opts.commodity ?? 'Freight',
-            quantity: pallets,
-            totalWeight: pallets * weightPerPallet,
-            weightUnit: 'lbs',
-            length: l ?? 48,
-            width: w ?? 40,
-            height: h ?? 48,
-            sizeUnit: 'IN',
-            stackable: false,
-          }];
+        // The CLI books through the self-serve /api/v1/book endpoint, which does the
+        // Stripe charge + gw booking + do-not-invoice + accessorials + windows in one
+        // atomic server-side call. /api/v1/book needs a wq_ quote id, so we re-quote
+        // the cached lane/freight via /api/v1/{mode}/quote first (the `quote` command
+        // caches the lane/date/freight/accessorials under the quote id shown to the user).
+        const ctx = getCachedQuoteContext(quoteId);
+        if (!ctx) {
+          throw new Error(
+            `No saved quote details for ${quoteId}. Quotes can't be booked across sessions —\n` +
+            `run a fresh quote (e.g. "warp-agent ltl quote <origin> <dest> --pallets … --weight … --dims … --date …")\n` +
+            `and book the new quote id it prints.`,
+          );
         }
 
+        // Build pickup/delivery address patch from --pickup-*/--delivery-* flags.
+        // (Windows are sent separately, top-level, per the /api/v1/book contract.)
+        const patch: Record<string, unknown> = {};
         const hasPickup = opts.pickupStreet || opts.pickupCity || opts.pickupState || opts.pickupZip || opts.pickupContact || opts.pickupPhone || opts.pickupEmail;
         if (hasPickup) {
           const missing = [];
@@ -678,12 +665,11 @@ program
             city: opts.pickupCity!,
             state: opts.pickupState!,
             zipCode: opts.pickupZip!,
-            company: opts.pickupCompany,
             contactName: opts.pickupContact!,
             phone: opts.pickupPhone!,
             email: opts.pickupEmail!,
-            window: opts.pickupWindow,
-          } satisfies AddressContact;
+            ...(opts.pickupCompany ? { company: opts.pickupCompany } : {}),
+          };
         }
 
         const hasDelivery = opts.deliveryStreet || opts.deliveryCity || opts.deliveryState || opts.deliveryZip || opts.deliveryContact || opts.deliveryPhone || opts.deliveryEmail;
@@ -704,118 +690,89 @@ program
             city: opts.deliveryCity!,
             state: opts.deliveryState!,
             zipCode: opts.deliveryZip!,
-            company: opts.deliveryCompany,
             contactName: opts.deliveryContact!,
             phone: opts.deliveryPhone!,
             email: opts.deliveryEmail!,
-            window: opts.deliveryWindow,
-          } satisfies AddressContact;
+            ...(opts.deliveryCompany ? { company: opts.deliveryCompany } : {}),
+          };
         }
 
         if (opts.notes) patch.notes = opts.notes;
 
-        // Auto-load listItems from quote cache if not explicitly provided
-        if (!patch.listItems) {
-          const cached = getCachedQuoteItems(quoteId);
-          if (cached) patch.listItems = cached;
+        // Parse "HH:MM-HH:MM" → { from, to } (server validates HH:MM and builds windowTime).
+        const parseWindow = (w?: string): { from: string; to: string } | undefined => {
+          if (!w) return undefined;
+          const [from, to] = w.split("-").map((s) => s.trim());
+          if (!/^\d{2}:\d{2}$/.test(from ?? "") || !/^\d{2}:\d{2}$/.test(to ?? "")) {
+            throw new Error(`Invalid time window "${w}". Use HH:MM-HH:MM, e.g. 09:00-12:00.`);
+          }
+          return { from, to };
+        };
+        const pickupWindow = parseWindow(opts.pickupWindow);
+        const deliveryWindow = parseWindow(opts.deliveryWindow);
+
+        // Accessorials come from the cached quote (they must match what was quoted,
+        // or gw rejects the booking).
+        const ctxPickupSvcs = (ctx.pickup_services as string[] | undefined) ?? [];
+        const ctxDeliverySvcs = (ctx.delivery_services as string[] | undefined) ?? [];
+        const accessorials = (ctxPickupSvcs.length || ctxDeliverySvcs.length)
+          ? { pickup: ctxPickupSvcs, delivery: ctxDeliverySvcs }
+          : undefined;
+
+        const client = getAuthedClient();
+
+        // 1. Re-quote the cached lane/freight to get a fresh wq_ id.
+        const requote = await client.selfServeQuote(String(ctx.mode), {
+          origin_zip: ctx.origin_zip,
+          destination_zip: ctx.destination_zip,
+          pickup_date: ctx.pickup_date,
+          ...(ctx.pallets != null ? { pallets: ctx.pallets } : {}),
+          ...(ctx.weight_lbs_per_pallet != null ? { weight_lbs_per_pallet: ctx.weight_lbs_per_pallet } : {}),
+          ...(ctx.commodity ? { commodity: ctx.commodity } : {}),
+          ...(ctx.length_in != null ? { length_in: ctx.length_in } : {}),
+          ...(ctx.width_in != null ? { width_in: ctx.width_in } : {}),
+          ...(ctx.height_in != null ? { height_in: ctx.height_in } : {}),
+          ...(ctxPickupSvcs.length ? { pickup_services: ctxPickupSvcs } : {}),
+          ...(ctxDeliverySvcs.length ? { delivery_services: ctxDeliverySvcs } : {}),
+        });
+        const wqId = requote.quote_id as string | undefined;
+        if (!wqId || !wqId.startsWith("wq_")) {
+          throw new Error(`Could not get a bookable rate for ${ctx.origin_zip} → ${ctx.destination_zip}. ${(requote.error as string) ?? "Please run a fresh quote and retry."}`);
         }
 
-        const hasPatch = patch.pickup || patch.delivery || patch.notes || patch.listItems;
+        // 2. Book via /api/v1/book — atomic Stripe charge + gw booking +
+        //    do-not-invoice + accessorials + windows, all server-side.
+        const bookBody: Record<string, unknown> = { quote_id: wqId };
+        if (patch.pickup || patch.delivery || patch.notes) bookBody.patch = patch;
+        if (opts.reference) bookBody.reference = opts.reference;
+        if (opts.promo) bookBody.promo_code = opts.promo;
+        if (accessorials) bookBody.accessorials = accessorials;
+        if (pickupWindow) bookBody.pickup_window = pickupWindow;
+        if (deliveryWindow) bookBody.delivery_window = deliveryWindow;
 
-        // ── Charge card via wearewarp.com before booking ────────────────
-        // Captured from charge-me so a failed book below can be auto-refunded.
-        let paymentIntentId: string | undefined;
-        let chargedAmount = 0;
-        const config = loadConfig();
-        if (config?.api_key) {
-          // Get amount from cache — if missing, re-quote to get fresh price
-          let amountForCharge = getCachedQuoteAmount(quoteId);
-          if (!amountForCharge || amountForCharge <= 0) {
-            // Cache miss — fetch price from Warp API directly
-            try {
-              const quoteRes = await fetch(`https://gw.wearewarp.com/api/v1/freights/quote-history`, {
-                headers: { 'apikey': config.api_key },
-                signal: AbortSignal.timeout(10000),
-              });
-              if (quoteRes.ok) {
-                const history = await quoteRes.json() as { quotes?: Array<{ quote_id?: string; price?: { amount?: number } }> };
-                const match = history.quotes?.find((q) => q.quote_id === quoteId);
-                if (match?.price?.amount) amountForCharge = match.price.amount;
-              }
-            } catch { /* ignore — will fail at charge step */ }
-          }
-          if (!amountForCharge || amountForCharge <= 0) {
-            throw new Error('Could not determine quote price. Please run a fresh quote and book immediately.');
-          }
-          const amountCents = Math.round(amountForCharge * 100);
-          try {
-            const chargeRes = await fetch('https://www.wearewarp.com/api/v1/agents/charge-me', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.api_key}` },
-              body: JSON.stringify({ amount_cents: amountCents, quote_id: quoteId }),
-              signal: AbortSignal.timeout(15000),
-            });
-            if (!chargeRes.ok) {
-              const chargeBody = await chargeRes.json().catch(() => ({})) as { error?: string; code?: string; requires_action?: boolean };
-              if (chargeBody.code === 'PAYMENT_REQUIRED') {
-                throw new Error(`No payment method on file.\n\n  Add a card at: https://www.wearewarp.com/agents/onboard\n  Then retry your booking.`);
-              }
-              if (chargeBody.requires_action) {
-                throw new Error(`Your card requires additional authentication. Please visit your Warp account to complete payment.`);
-              }
-              throw new Error(`Payment failed: ${chargeBody.error ?? chargeRes.status}`);
-            }
-            // Charge succeeded — capture the PaymentIntent id + amount so a
-            // failed book below can be auto-refunded.
-            const okBody = await chargeRes.json().catch(() => ({})) as { payment_intent_id?: string };
-            paymentIntentId = okBody.payment_intent_id;
-            chargedAmount = amountForCharge;
-          } catch (chargeErr: unknown) {
-            if (chargeErr instanceof Error) throw chargeErr;
-            throw new Error('Could not reach payment service. Check your connection and retry.');
-          }
-        }
-        // ─────────────────────────────────────────────────────────────────
+        let data: Record<string, unknown> = {};
+        await showLoginSpinner("Booking shipment...", client.selfServeBook(bookBody).then((r) => { data = r as unknown as Record<string, unknown>; }));
 
-        let data: Record<string, unknown>;
-        try {
-          await showLoginSpinner("Booking shipment...", getAuthedClient().book(
-            quoteId,
-            hasPatch ? patch : undefined,
-            opts.reference,
-            opts.promo,
-          ).then(r => { data = r as unknown as Record<string, unknown>; }));
-          data = data!;
-        } catch (bookErr: unknown) {
-          // Charged above but the booking failed — reverse the charge so the
-          // customer is never left charged with no shipment.
-          const base = bookErr instanceof Error ? bookErr.message : String(bookErr);
-          if (chargedAmount > 0 && config?.api_key) {
-            const note = await autoRefund(config.api_key, paymentIntentId, chargedAmount, quoteId);
-            throw new Error(`Booking failed: ${base}\n\n${note}`);
-          }
-          throw bookErr;
-        }
-
-        const bookData = data as unknown as Record<string, unknown>;
-        // Do-not-invoice is handled server-side by warp-site during book —
-        // the proxy already sees the Stripe charge up-front and auto-marks
-        // the order. No client-side secret needed; do not re-add.
-
-        // Track analytics
-        if (bookData?.trackingNumber) {
+        const bookData = data;
+        // Track analytics (the /api/v1/book response is snake_case).
+        const trackingNo = (bookData?.tracking_number ?? bookData?.trackingNumber) as string | undefined;
+        if (trackingNo) {
           const cachedAmt = getCachedQuoteAmount(quoteId);
+          const orderId = (bookData.order_id ?? bookData.orderId) as string | undefined;
+          const shipmentId = (bookData.shipment_id ?? bookData.shipmentId) as string | undefined;
+          const oZip = String(ctx.origin_zip ?? "");
+          const dZip = String(ctx.destination_zip ?? "");
           trackBooking({
             source: "cli",
-            tracking_number: bookData.trackingNumber as string,
-            order_id: bookData.orderId as string | undefined,
-            shipment_id: bookData.shipmentId as string | undefined,
+            tracking_number: trackingNo,
+            order_id: orderId,
+            shipment_id: shipmentId,
             quote_id: quoteId,
             amount_usd: cachedAmt,
-            origin_zip: patch.pickup?.zipCode,
-            dest_zip: patch.delivery?.zipCode,
+            origin_zip: oZip,
+            dest_zip: dZip,
           });
-          notifyBooking({ source: 'cli', origin_zip: patch.pickup?.zipCode, dest_zip: patch.delivery?.zipCode, tracking_number: bookData.trackingNumber as string, order_id: bookData.orderId as string | undefined, shipment_id: bookData.shipmentId as string | undefined, quote_id: quoteId, amount_usd: cachedAmt ?? undefined }).catch(() => {});
+          notifyBooking({ source: 'cli', origin_zip: oZip, dest_zip: dZip, tracking_number: trackingNo, order_id: orderId, shipment_id: shipmentId, quote_id: quoteId, amount_usd: cachedAmt ?? undefined }).catch(() => {});
         }
         const result = {
           ...bookData,

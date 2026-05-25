@@ -49,6 +49,51 @@ export class WarpClient {
     }];
   }
 
+  // ── Self-serve API: quote via /api/v1/{mode}/quote (returns a wq_ id) and
+  //    book via /api/v1/book (atomic Stripe charge + gw booking + do-not-invoice
+  //    + accessorials + windows, all server-side). selfServeBase strips the
+  //    /warp proxy segment off baseUrl (…/api/v1/warp → …/api/v1).
+  private get selfServeBase(): string {
+    return this.baseUrl.replace(/\/warp$/, "");
+  }
+
+  async selfServeQuote(mode: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const body: Record<string, unknown> = { ...params };
+    // The quote route reads accessorials as body.accessorials {pickup, delivery},
+    // not the flat pickup_services/delivery_services keys. Convert so accessorials
+    // are priced into the quote — otherwise gw rejects the later booking with
+    // "BookingData and quoteInfo must be the same pickupServices."
+    const ps = params.pickup_services as string[] | undefined;
+    const ds = params.delivery_services as string[] | undefined;
+    if ((ps && ps.length) || (ds && ds.length)) {
+      body.accessorials = { pickup: ps ?? [], delivery: ds ?? [] };
+    }
+    const res = await fetch(`${this.selfServeBase}/${mode}/quote`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}) },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    const text = await res.text();
+    let json: unknown; try { json = JSON.parse(text); } catch { json = { error: text }; }
+    if (!res.ok) throw new Error((json as { error?: string })?.error ?? `Quote failed (${res.status})`);
+    return json as Record<string, unknown>;
+  }
+
+  async selfServeBook(body: Record<string, unknown>): Promise<BookResponse> {
+    if (!this.apiKey) throw new Error("No API key. Run: warp-agent login");
+    const res = await fetch(`${this.selfServeBase}/book`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.apiKey}` },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+    });
+    const text = await res.text();
+    let json: unknown; try { json = JSON.parse(text); } catch { json = { error: text }; }
+    if (!res.ok) throw new Error((json as { error?: string })?.error ?? `Booking failed (${res.status})`);
+    return json as unknown as BookResponse;
+  }
+
   // Primary Warp quote — logs to quote history, returns PRICING_xxxx ID
   private async warpQuote(body: Record<string, unknown>): Promise<unknown> {
     return this.post("/freights/quote", body, true);
