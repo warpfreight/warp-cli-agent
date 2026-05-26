@@ -1,6 +1,6 @@
 {
   "name": "@warpfreight/cli-agent",
-  "version": "0.5.72",
+  "version": "0.5.73",
   "description": "AI Agent CLI for Warp freight. Full booking lifecycle: quote (van/box-truck/FTL/LTL), book, track, events, invoices, documents, lane history, quote history. Self-provisioning login, JSON-first output.",
   "keywords": [
     "warp",

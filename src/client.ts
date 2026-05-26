@@ -134,21 +134,16 @@ export class WarpClient {
   }
 
   async quoteVan(origin: string, dest: string, pallets: number, weight: number, date: string, pickupServices: string[] = [], deliveryServices: string[] = []): Promise<QuoteResponse> {
-    if (!this.apiKey) return this.mapPublicQuote(await this.selfServeQuote("van", { origin_zip: origin, destination_zip: dest, pickup_date: date, pallets, weight_lbs_per_pallet: weight, pickup_services: pickupServices, delivery_services: deliveryServices }));
-    const items = this.buildItems(pallets, weight);
-    return this.quoteCombined(
-      { pickupDate: date, pickupInfo: { zipcode: origin }, deliveryInfo: { zipcode: dest }, listItems: items },
-      { pickupDate: date, pickupInfo: { zipcode: origin }, deliveryInfo: { zipcode: dest }, items, pickupServices, dropoffServices: deliveryServices },
-    );
+    // Always price via the mode-aware public /van/quote. gw /freights/quote has
+    // no van vehicle mode and silently defaults to shipmentType "LTL", which
+    // mispriced the keyed path (returned an LTL rate labeled as a van quote).
+    return this.mapPublicQuote(await this.selfServeQuote("van", { origin_zip: origin, destination_zip: dest, pickup_date: date, pallets, weight_lbs_per_pallet: weight, pickup_services: pickupServices, delivery_services: deliveryServices }));
   }
 
   async quoteBoxTruck(origin: string, dest: string, pallets: number, weight: number, date: string, pickupServices: string[] = [], deliveryServices: string[] = []): Promise<QuoteResponse> {
-    if (!this.apiKey) return this.mapPublicQuote(await this.selfServeQuote("box-truck", { origin_zip: origin, destination_zip: dest, pickup_date: date, pallets, weight_lbs_per_pallet: weight, pickup_services: pickupServices, delivery_services: deliveryServices }));
-    const items = this.buildItems(pallets, weight);
-    return this.quoteCombined(
-      { pickupDate: date, pickupInfo: { zipcode: origin }, deliveryInfo: { zipcode: dest }, listItems: items },
-      { pickupDate: date, pickupInfo: { zipcode: origin }, deliveryInfo: { zipcode: dest }, items, pickupServices, dropoffServices: deliveryServices },
-    );
+    // Always price via the mode-aware public /box-truck/quote (see quoteVan —
+    // the gw path defaults to LTL and mispriced keyed box-truck quotes).
+    return this.mapPublicQuote(await this.selfServeQuote("box-truck", { origin_zip: origin, destination_zip: dest, pickup_date: date, pallets, weight_lbs_per_pallet: weight, pickup_services: pickupServices, delivery_services: deliveryServices }));
   }
 
   async quoteFtl(origin: string, dest: string, date: string): Promise<QuoteResponse> {
