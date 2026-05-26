@@ -288,12 +288,15 @@ export class WarpClient {
 
   async lanes(): Promise<LanesResponse> {
     // Derived from shipments — get unique lanes
-    const data = await this.get<{ data: Array<{ pickupInfo?: { zipcode?: string }; deliveryInfo?: { zipcode?: string } }> }>("/freights/shipments?pageSize=100", true);
+    type Stop = { zipcode?: string; address?: { zipcode?: string } };
+    const data = await this.get<{ data: Array<{ pickupInfo?: Stop; deliveryInfo?: Stop }> }>("/freights/shipments?pageSize=100", true);
     const seen = new Set<string>();
     const lanes: Array<{ origin: string; dest: string }> = [];
     for (const s of data.data ?? []) {
-      const origin = s.pickupInfo?.zipcode;
-      const dest   = s.deliveryInfo?.zipcode;
+      // Shipments nest the ZIP at pickupInfo.address.zipcode; older rows had it
+      // flat at pickupInfo.zipcode. Read address first, fall back to flat.
+      const origin = s.pickupInfo?.address?.zipcode ?? s.pickupInfo?.zipcode;
+      const dest   = s.deliveryInfo?.address?.zipcode ?? s.deliveryInfo?.zipcode;
       if (origin && dest) {
         const key = `${origin}-${dest}`;
         if (!seen.has(key)) { seen.add(key); lanes.push({ origin, dest }); }
