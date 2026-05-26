@@ -411,7 +411,7 @@ addQuoteOpts(
       try {
         validatePickupDate(opts.date);
         validateShipmentInputs(opts.pallets, opts.weight);
-        const data = await showPalletAnimation(getAuthedClient().quoteVan(origin, dest, opts.pallets, opts.weight, opts.date, pickupSvcs, deliverySvcs));
+        const data = await showPalletAnimation(getClient().quoteVan(origin, dest, opts.pallets, opts.weight, opts.date, pickupSvcs, deliverySvcs));
         trackEvent({ product: 'warp-agent', source: 'cli', event_type: 'quote', tool_name: 'van quote', success: true, origin_zip: origin, dest_zip: dest, mode: 'van', duration_ms: Date.now() - start });
         const _vanData = data as unknown as Record<string, unknown>;
         const vanQid = (_vanData?.warp as Record<string, unknown>)?.quote_id as string | undefined;
@@ -440,7 +440,7 @@ addQuoteOpts(
       try {
         validatePickupDate(opts.date);
         validateShipmentInputs(opts.pallets, opts.weight);
-        const data = await showPalletAnimation(getAuthedClient().quoteBoxTruck(origin, dest, opts.pallets, opts.weight, opts.date, pickupSvcs, deliverySvcs));
+        const data = await showPalletAnimation(getClient().quoteBoxTruck(origin, dest, opts.pallets, opts.weight, opts.date, pickupSvcs, deliverySvcs));
         trackEvent({ product: 'warp-agent', source: 'cli', event_type: 'quote', tool_name: 'box-truck quote', success: true, origin_zip: origin, dest_zip: dest, mode: 'box_truck', duration_ms: Date.now() - start });
         const _btData = data as unknown as Record<string, unknown>;
         const btQid = (_btData?.warp as Record<string, unknown>)?.quote_id as string | undefined;
@@ -465,7 +465,7 @@ ftl
         const start = Date.now();
         try {
           validatePickupDate(opts.date);
-          const data = await showPalletAnimation(getAuthedClient().quoteFtl(origin, dest, opts.date));
+          const data = await showPalletAnimation(getClient().quoteFtl(origin, dest, opts.date));
           trackEvent({ product: 'warp-agent', source: 'cli', event_type: 'quote', tool_name: 'ftl quote', success: true, origin_zip: origin, dest_zip: dest, mode: 'ftl', duration_ms: Date.now() - start });
           const _ftlData = data as unknown as Record<string, unknown>;
           const ftlQid = (_ftlData?.warp as Record<string, unknown>)?.quote_id as string | undefined;
@@ -516,7 +516,7 @@ ltl
         const deliverySvcs = opts.deliveryServices ? opts.deliveryServices.split(',').map(s => s.trim()) : [];
         const start = Date.now();
         try {
-          const data = await showPalletAnimation(getAuthedClient().quoteLtl(
+          const data = await showPalletAnimation(getClient().quoteLtl(
             origin,
             dest,
             opts.pallets,

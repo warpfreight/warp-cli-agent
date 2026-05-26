@@ -118,7 +118,23 @@ export class WarpClient {
     return { warp, market } as unknown as QuoteResponse;
   }
 
+  // Keyless path: the public /api/v1/{mode}/quote routes need no auth. Map their
+  // flat response into the {warp, market} shape the formatter expects. Logged-in
+  // users keep the gw combined path below (Warp rate + full market spread).
+  private mapPublicQuote(q: Record<string, unknown>): QuoteResponse {
+    const warp = q.quote_id
+      ? {
+          quote_id: q.quote_id as string,
+          price: { amount: Number(q.price_usd) || 0, currency_code: (q.currency as string) || "USD" },
+          transit_time: q.transit_days as number,
+          status: "ACCEPT",
+        }
+      : null;
+    return { warp, market: { options: [] } } as unknown as QuoteResponse;
+  }
+
   async quoteVan(origin: string, dest: string, pallets: number, weight: number, date: string, pickupServices: string[] = [], deliveryServices: string[] = []): Promise<QuoteResponse> {
+    if (!this.apiKey) return this.mapPublicQuote(await this.selfServeQuote("van", { origin_zip: origin, destination_zip: dest, pickup_date: date, pallets, weight_lbs_per_pallet: weight, pickup_services: pickupServices, delivery_services: deliveryServices }));
     const items = this.buildItems(pallets, weight);
     return this.quoteCombined(
       { pickupDate: date, pickupInfo: { zipcode: origin }, deliveryInfo: { zipcode: dest }, listItems: items },
@@ -127,6 +143,7 @@ export class WarpClient {
   }
 
   async quoteBoxTruck(origin: string, dest: string, pallets: number, weight: number, date: string, pickupServices: string[] = [], deliveryServices: string[] = []): Promise<QuoteResponse> {
+    if (!this.apiKey) return this.mapPublicQuote(await this.selfServeQuote("box-truck", { origin_zip: origin, destination_zip: dest, pickup_date: date, pallets, weight_lbs_per_pallet: weight, pickup_services: pickupServices, delivery_services: deliveryServices }));
     const items = this.buildItems(pallets, weight);
     return this.quoteCombined(
       { pickupDate: date, pickupInfo: { zipcode: origin }, deliveryInfo: { zipcode: dest }, listItems: items },
@@ -135,6 +152,7 @@ export class WarpClient {
   }
 
   async quoteFtl(origin: string, dest: string, date: string): Promise<QuoteResponse> {
+    if (!this.apiKey) return this.mapPublicQuote(await this.selfServeQuote("ftl", { origin_zip: origin, destination_zip: dest, pickup_date: date }));
     // FTL prices the whole truck, so pallets/weight don't move the rate — use
     // representative placeholders. Routes through the SAME working proxy path as
     // the other modes (warpQuote + marketQuote); the old public-search endpoint
@@ -155,6 +173,7 @@ export class WarpClient {
     pickupServices: string[] = [],
     deliveryServices: string[] = [],
   ): Promise<QuoteResponse> {
+    if (!this.apiKey) return this.mapPublicQuote(await this.selfServeQuote("ltl", { origin_zip: origin, destination_zip: dest, pickup_date: date, pallets, weight_lbs_per_pallet: weight, commodity, length_in: dims.length, width_in: dims.width, height_in: dims.height, pickup_services: pickupServices, delivery_services: deliveryServices }));
     const listItems = this.buildItems(pallets, weight, commodity, dims);
     const items = listItems;
     const [warpResult, marketResult] = await Promise.allSettled([
