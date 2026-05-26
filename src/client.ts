@@ -19,7 +19,10 @@ import type {
 } from "./types.js";
 
 const DEFAULT_BASE_URL = "https://www.wearewarp.com/api/v1/warp";
-const TIMEOUT_MS = 15_000;
+// 30s: the LTL market spread (/freights/freight-quote) polls every carrier and
+// takes ~15-20s. 15s cut it off, so `ltl quote` returned an empty `market` block.
+// This is a ceiling, not a delay — fast endpoints still return in ~1s.
+const TIMEOUT_MS = 30_000;
 const CLIENT_VERSION = "0.3.0";
 const USER_AGENT = `warp-agent-cli/${CLIENT_VERSION}`;
 
@@ -355,7 +358,7 @@ export class WarpClient {
       }
       return json;
     } catch (e: unknown) {
-      if (e instanceof Error && e.name === "AbortError") throw new Error("Request timed out (15s).");
+      if (e instanceof Error && e.name === "AbortError") throw new Error("Request timed out (30s).");
       throw e;
     } finally {
       clearTimeout(timeout);
